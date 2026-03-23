@@ -1,0 +1,35 @@
+---
+description: Superpowers framework for spec-to-code execution
+alwaysApply: true
+---
+
+# Superpowers: Spec-to-Code Workflow
+
+Use this sequence for every non-trivial change.
+
+## 1) Align Intent
+- Read `.kiro/specs/*/requirements.md`, `design.md`, and `tasks.md` before coding.
+- If implementation and specs diverge, update docs or call out the mismatch before/with code changes.
+
+## 2) Implement in Vertical Slices
+- Prefer small end-to-end slices over large refactors.
+- For each slice: update models/contracts first, then core logic, then API/UI integration.
+
+## 3) Preserve Contracts
+- Keep API response shapes stable unless explicitly changing contract.
+- If changing behavior, update both docs and tests in the same change.
+
+## 4) Verification Gate
+- Run or update unit/e2e tests that cover changed behavior.
+- Validate critical paths: session start/progress/cancel/export and persistence.
+
+## 5) Performance + Maintainability Check
+- For hot-path changes, include a short runtime impact note.
+- Prefer config flags and feature toggles for risky changes.
+- Avoid introducing infra complexity unless there is measured need.
+
+## 6) Done Criteria
+- Code, tests, and docs are all updated.
+- README and `.kiro` specs match current behavior.
+- Any follow-up work is recorded in `tasks.md` with clear status.
+
