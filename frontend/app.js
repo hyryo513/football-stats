@@ -885,6 +885,11 @@ els.startAnalysisBtn.addEventListener("click", startAnalysis);
 async function startAnalysis() {
   hideAlert();
 
+  // Stop video playback so audio doesn't continue during analysis
+  if (els.bboxVideo) {
+    els.bboxVideo.pause();
+  }
+
   // Build playerRef
   if (state.activeTab === "jersey") {
     const n = parseInt(els.jerseyInput.value, 10);
