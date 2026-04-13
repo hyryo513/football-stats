@@ -104,6 +104,73 @@ def _ocr_jersey_number(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> Op
     return text.strip() or None
 
 
+def _center(box: tuple[int, int, int, int]) -> tuple[float, float]:
+    """Return the centre (cx, cy) of an (x, y, w, h) box."""
+    x, y, w, h = box
+    return x + w / 2.0, y + h / 2.0
+
+
+def _center_distance(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Euclidean distance between centres of two (x, y, w, h) boxes."""
+    cx_a, cy_a = _center(box_a)
+    cx_b, cy_b = _center(box_b)
+    return ((cx_a - cx_b) ** 2 + (cy_a - cy_b) ** 2) ** 0.5
+
+
+def _compute_appearance_histogram(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+    """Compute a multi-channel HSV histogram for the torso region of a player crop.
+
+    Focusing on the torso (middle 60% vertically, central 80% horizontally)
+    reduces noise from background, legs, and head, giving a more stable jersey
+    colour signature.  Returns a concatenated [H, S] histogram (180+256 bins).
+    """
+    x, y, w, h = bbox
+    x, y = max(0, x), max(0, y)
+    crop = frame[y : y + h, x : x + w]
+    if crop.size == 0:
+        return np.zeros((180 + 256,), dtype=np.float32)
+
+    # Extract torso region
+    ch, cw = crop.shape[:2]
+    ty = int(ch * 0.2)
+    by = int(ch * 0.8)
+    tx = int(cw * 0.1)
+    bx = int(cw * 0.9)
+    torso = crop[ty:by, tx:bx]
+    if torso.size == 0:
+        torso = crop
+
+    hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+    h_hist = cv2.calcHist([hsv], [0], None, [180], [0, 180])
+    s_hist = cv2.calcHist([hsv], [1], None, [256], [0, 256])
+    cv2.normalize(h_hist, h_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(s_hist, s_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    return np.concatenate([h_hist.flatten(), s_hist.flatten()]).astype(np.float32)
+
+
+def _appearance_similarity(hist_a: np.ndarray, hist_b: np.ndarray) -> float:
+    """Compare two appearance histograms. Returns similarity in [0, 1]."""
+    if hist_a.size == 0 or hist_b.size == 0:
+        return 0.0
+    # Split into H and S portions and average their correlations
+    h_a, s_a = hist_a[:180], hist_a[180:]
+    h_b, s_b = hist_b[:180], hist_b[180:]
+
+    h_corr = cv2.compareHist(
+        h_a.reshape(-1, 1).astype(np.float32),
+        h_b.reshape(-1, 1).astype(np.float32),
+        cv2.HISTCMP_CORREL,
+    )
+    s_corr = cv2.compareHist(
+        s_a.reshape(-1, 1).astype(np.float32),
+        s_b.reshape(-1, 1).astype(np.float32),
+        cv2.HISTCMP_CORREL,
+    )
+    # Weight hue more heavily than saturation
+    correl = 0.7 * h_corr + 0.3 * s_corr
+    return float(np.clip((correl + 1) / 2, 0.0, 1.0))
+
+
 class Tracker:
     """Wraps YOLOv8 + ByteTrack for player and ball tracking."""
 
@@ -123,6 +190,8 @@ class Tracker:
         self._frames_total: int = 0
         self._frames_confident: int = 0
         self._last_reacquire_log_frame: int = -10_000
+        # Appearance model: captured when the target player is first identified
+        self._target_appearance: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -174,19 +243,101 @@ class Tracker:
         self._initialized = True
 
     def _find_target_across_frames(self, start_frame_idx: int) -> Optional[tuple[int, int]]:
-        """Scan frames sequentially until the target can be identified."""
+        """Scan frames sequentially until the target can be identified.
+
+        For bbox mode, uses multi-frame confirmation: once a candidate is found,
+        checks subsequent frames to verify the same track_id persists, reducing
+        false matches from transient overlaps.
+        """
         frame_idx = start_frame_idx
+        confirmation_needed = 3 if self.player_ref.method == "bbox" else 1
+        candidate_track_id: Optional[int] = None
+        candidate_frame_idx: Optional[int] = None
+        candidate_frame: Optional[np.ndarray] = None
+        confirm_count = 0
+
         while True:
             ok, frame = self._cap.read()
             if not ok:
+                # If we had a partial confirmation, accept it
+                if candidate_track_id is not None and confirm_count > 0:
+                    self._capture_appearance(candidate_frame, candidate_track_id, None)
+                    return candidate_frame_idx, candidate_track_id
                 return None
+
             results = self._model.track(
                 frame, tracker="bytetrack.yaml", persist=True, verbose=False, imgsz=1280
             )
-            track_id = self._find_player_in_frame(frame, results[0])
-            if track_id is not None:
-                return frame_idx, track_id
+            result = results[0]
+
+            if candidate_track_id is None:
+                # Still searching for initial match
+                track_id = self._find_player_in_frame(frame, result)
+                if track_id is not None:
+                    candidate_track_id = track_id
+                    candidate_frame_idx = frame_idx
+                    candidate_frame = frame.copy()
+                    confirm_count = 1
+                    if confirm_count >= confirmation_needed:
+                        self._capture_appearance(frame, track_id, result)
+                        return frame_idx, track_id
+            else:
+                # Confirming candidate across subsequent frames
+                if self._track_id_present(result, candidate_track_id):
+                    confirm_count += 1
+                    if confirm_count >= confirmation_needed:
+                        self._capture_appearance(candidate_frame, candidate_track_id, None)
+                        return candidate_frame_idx, candidate_track_id
+                else:
+                    # Candidate disappeared — reset and keep searching
+                    logger.debug(
+                        "Candidate track_id=%s lost during confirmation at frame=%s",
+                        candidate_track_id,
+                        frame_idx,
+                    )
+                    candidate_track_id = None
+                    candidate_frame_idx = None
+                    candidate_frame = None
+                    confirm_count = 0
+                    # Try this frame as a fresh start
+                    track_id = self._find_player_in_frame(frame, result)
+                    if track_id is not None:
+                        candidate_track_id = track_id
+                        candidate_frame_idx = frame_idx
+                        candidate_frame = frame.copy()
+                        confirm_count = 1
+
             frame_idx += 1
+
+    @staticmethod
+    def _track_id_present(result, track_id: int) -> bool:
+        """Check whether a given track_id appears in a YOLO result."""
+        boxes = result.boxes
+        if boxes is None or boxes.id is None:
+            return False
+        ids = boxes.id.cpu().numpy().astype(int).tolist()
+        return track_id in ids
+
+    def _capture_appearance(
+        self, frame: np.ndarray, track_id: int, result
+    ) -> None:
+        """Store the appearance histogram of the matched player."""
+        bbox = None
+        if result is not None:
+            boxes = result.boxes
+            if boxes is not None and boxes.id is not None:
+                for i, cls_tensor in enumerate(boxes.cls):
+                    if int(cls_tensor.item()) != _PERSON_CLASS:
+                        continue
+                    if int(boxes.id[i].item()) == track_id:
+                        xyxy = boxes.xyxy[i].cpu().numpy().astype(int)
+                        bbox = (xyxy[0], xyxy[1], xyxy[2] - xyxy[0], xyxy[3] - xyxy[1])
+                        break
+        if bbox is None and self.player_ref.method == "bbox" and self.player_ref.bbox is not None:
+            bbox = self.player_ref.bbox
+        if bbox is not None:
+            self._target_appearance = _compute_appearance_histogram(frame, bbox)
+            logger.debug("Captured appearance histogram for track_id=%s", track_id)
 
     def track_frames(self) -> Iterator[FrameResult]:
         """Yield a FrameResult for every frame in the video."""
@@ -237,6 +388,18 @@ class Tracker:
                     )
                 low_conf_streak = 0
                 self._last_player_box = player_box
+                # Refresh appearance model every ~90 frames during confident tracking
+                if (
+                    self._target_appearance is not None
+                    and player_box is not None
+                    and self._frames_total % 90 == 0
+                ):
+                    new_hist = _compute_appearance_histogram(frame, player_box)
+                    sim = _appearance_similarity(self._target_appearance, new_hist)
+                    if sim > 0.7:
+                        self._target_appearance = (
+                            0.9 * self._target_appearance + 0.1 * new_hist
+                        )
 
             yield FrameResult(
                 frame_idx=frame_idx,
@@ -260,7 +423,7 @@ class Tracker:
         if self.player_ref.method == "jersey":
             return self._find_by_jersey(frame, result)
         else:  # bbox
-            return self._find_by_bbox(result)
+            return self._find_by_bbox(frame, result)
 
     def _find_by_jersey(self, frame: np.ndarray, result) -> Optional[int]:
         """OCR each detected person bbox; return track_id of the matching jersey.
@@ -335,8 +498,17 @@ class Tracker:
 
         return candidates[0][0]
 
-    def _find_by_bbox(self, result) -> Optional[int]:
-        """Match user-drawn bbox (frame 0) to detected persons via IoU."""
+    def _find_by_bbox(self, frame: np.ndarray, result) -> Optional[int]:
+        """Match user-drawn bbox to detected persons using combined scoring.
+
+        Uses a weighted combination of:
+        - IoU overlap (primary signal when the drawn box is precise)
+        - Centre-point distance (fallback when the drawn box is imprecise)
+        - Relative size similarity (penalises wildly different-sized detections)
+
+        This replaces the previous IoU-only approach which failed when users
+        drew imprecise boxes or when YOLO detection boxes didn't align well.
+        """
         ref_bbox = self.player_ref.bbox  # (x, y, w, h)
         if ref_bbox is None:
             return None
@@ -345,7 +517,12 @@ class Tracker:
         if boxes is None or boxes.id is None:
             return None
 
-        best_iou = 0.0
+        ref_cx, ref_cy = _center(ref_bbox)
+        ref_area = ref_bbox[2] * ref_bbox[3]
+        # Use the diagonal of the reference box as normalisation for distance
+        ref_diag = max(1.0, (ref_bbox[2] ** 2 + ref_bbox[3] ** 2) ** 0.5)
+
+        best_score = -1.0
         best_track_id: Optional[int] = None
 
         for i, cls_tensor in enumerate(boxes.cls):
@@ -356,12 +533,30 @@ class Tracker:
             x1, y1, x2, y2 = xyxy
             det_bbox = (x1, y1, x2 - x1, y2 - y1)
 
+            # IoU component [0, 1]
             iou = _iou(ref_bbox, det_bbox)
-            if iou > best_iou:
-                best_iou = iou
+
+            # Centre-distance component: convert distance to a [0, 1] similarity
+            dist = _center_distance(ref_bbox, det_bbox)
+            dist_sim = max(0.0, 1.0 - dist / (ref_diag * 3.0))
+
+            # Size similarity: ratio of smaller area to larger area [0, 1]
+            det_area = det_bbox[2] * det_bbox[3]
+            if ref_area > 0 and det_area > 0:
+                size_sim = min(ref_area, det_area) / max(ref_area, det_area)
+            else:
+                size_sim = 0.0
+
+            # Combined score: IoU dominates when overlap exists, distance helps
+            # when the user-drawn box is offset from the detection
+            score = 0.5 * iou + 0.35 * dist_sim + 0.15 * size_sim
+
+            if score > best_score:
+                best_score = score
                 best_track_id = int(boxes.id[i].item())
 
-        return best_track_id if best_iou > 0.0 else None
+        # Require a minimum combined score to avoid matching distant players
+        return best_track_id if best_score > 0.15 else None
 
     def _parse_result(
         self,
@@ -439,25 +634,54 @@ class Tracker:
         frame: np.ndarray,
         candidates: list[tuple[int, tuple[int, int, int, int], float]],
     ) -> Optional[tuple[int, tuple[int, int, int, int], float]]:
-        """Pick the best fallback candidate when current target id disappears."""
+        """Pick the best fallback candidate when current target id disappears.
+
+        Uses a combined scoring approach:
+        - Spatial continuity (IoU with last known position)
+        - Appearance similarity (histogram match with captured target appearance)
+        - Detection confidence
+
+        For bbox mode, the appearance signal is especially important because
+        the original user-drawn box becomes stale as the player moves.
+        """
         if not candidates:
             return None
 
-        # 1) Prefer spatial continuity with last known player box.
-        if self._last_player_box is not None:
-            best = max(candidates, key=lambda c: _iou(self._last_player_box, c[1]))
-            if _iou(self._last_player_box, best[1]) > 0:
-                return best
+        def _score(candidate: tuple[int, tuple[int, int, int, int], float]) -> float:
+            _track_id, bbox, conf = candidate
+            score = 0.0
 
-        # 2) For bbox mode, anchor to user-drawn box.
-        if self.player_ref.method == "bbox" and self.player_ref.bbox is not None:
-            best = max(candidates, key=lambda c: _iou(self.player_ref.bbox, c[1]))
-            if _iou(self.player_ref.bbox, best[1]) > 0:
-                return best
+            # Spatial continuity with last known position
+            if self._last_player_box is not None:
+                iou = _iou(self._last_player_box, bbox)
+                dist = _center_distance(self._last_player_box, bbox)
+                last_diag = max(
+                    1.0,
+                    (self._last_player_box[2] ** 2 + self._last_player_box[3] ** 2) ** 0.5,
+                )
+                dist_sim = max(0.0, 1.0 - dist / (last_diag * 4.0))
+                spatial = 0.6 * iou + 0.4 * dist_sim
+                score += 0.45 * spatial
 
-        # 3) For jersey mode with color hint, prefer nearest color match.
+            # Appearance similarity (bbox mode or when appearance is captured)
+            if self._target_appearance is not None:
+                cand_appearance = _compute_appearance_histogram(frame, bbox)
+                app_sim = _appearance_similarity(self._target_appearance, cand_appearance)
+                score += 0.40 * app_sim
+
+            # Anchor to original user-drawn box (bbox mode only, decayed weight)
+            if self.player_ref.method == "bbox" and self.player_ref.bbox is not None:
+                anchor_iou = _iou(self.player_ref.bbox, bbox)
+                score += 0.05 * anchor_iou
+
+            # Detection confidence as tiebreaker
+            score += 0.10 * conf
+
+            return score
+
+        # For jersey mode with color hint but no appearance, fall back to color matching
         jersey_color = (self.player_ref.jersey_color or "").strip()
-        if self.player_ref.method == "jersey" and jersey_color:
+        if self.player_ref.method == "jersey" and jersey_color and self._target_appearance is None:
             ref_hist = _get_reference_histogram(jersey_color)
 
             def _sim(candidate: tuple[int, tuple[int, int, int, int], float]) -> float:
@@ -469,8 +693,19 @@ class Tracker:
 
             return max(candidates, key=_sim)
 
-        # 4) Final fallback: highest-confidence detected person.
-        return max(candidates, key=lambda c: c[2])
+        best = max(candidates, key=_score)
+
+        # Update appearance model periodically during confident tracking
+        if self._target_appearance is not None:
+            best_appearance = _compute_appearance_histogram(frame, best[1])
+            sim = _appearance_similarity(self._target_appearance, best_appearance)
+            if sim > 0.7:
+                # Exponential moving average to adapt to lighting changes
+                self._target_appearance = (
+                    0.9 * self._target_appearance + 0.1 * best_appearance
+                )
+
+        return best
 
     def get_tracking_summary(self) -> dict[str, object]:
         """Return per-session tracking quality diagnostics."""
