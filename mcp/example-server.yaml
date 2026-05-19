@@ -1,0 +1,43 @@
+# Example MCP server definition (template).
+# Replace contents when authoring a real server. Files under /mcp/ are
+# risk:high — changes require human review.
+
+name: example-server
+version: 0.1.0
+description: >
+  Template MCP server exposing a single read-only example tool. Replace
+  with a real server definition; do not enable as-is.
+owner: "TODO(human): assign-owner"
+last-reviewed: 2026-05-19
+
+transport:
+  type: stdio
+  command: example-mcp-server
+  args:
+    - --read-only
+
+tool-surface:
+  - name: example-tool
+    ref: tools/example-tool.json
+
+permissions:
+  filesystem:
+    # Empty by default. Add absolute paths or glob patterns only with a
+    # justification comment.
+    read: []
+    write: []
+  network:
+    # Hostnames the server is allowed to reach. Empty means none.
+    allow-hosts: []
+  secrets:
+    # Named secret references resolved at runtime via the host store.
+    # Never embed secret values here.
+    - EXAMPLE_API_TOKEN
+  env:
+    # Environment variables the server may read.
+    - EXAMPLE_LOG_LEVEL
+
+# Notes for reviewers:
+# - TODO(human): confirm whether this server should be stdio (local) or
+#   sse/http (networked) once we have a concrete use case.
+# - TODO(human): assign owner before flipping status to production.

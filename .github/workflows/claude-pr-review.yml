@@ -1,0 +1,37 @@
+# claude-pr-review.yml
+# Purpose:      Run Claude Code against every PR and post a review comment.
+# Owner:        TODO(human): assign-owner
+# Last-reviewed: 2026-05-19
+
+name: claude-pr-review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Claude PR review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: "--max-turns 8 --model claude-sonnet-4-6"
+          # The action reads CLAUDE.md at the repo root and uses it as
+          # the conventions context for the review prompt.
+          conventions_file: CLAUDE.md
+          prompt_ref: prompts/code-review.prompt.md
+          # Posts a single review comment summarising findings on the PR.
+          post_comment: true
