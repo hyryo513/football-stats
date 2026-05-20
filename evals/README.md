@@ -18,11 +18,15 @@ description: <one-line summary>
 owner: <team-or-handle>
 last-reviewed: YYYY-MM-DD
 
-# What this suite evaluates. Exactly one target must be set.
+# What this suite evaluates. Exactly one of prompt / tool / agent / image
+# must be set. `image` runs the eval against a published container image
+# (typically built by publish-mcp-server.yml) and exercises whatever MCP
+# tool-surface it exposes; pair it with `tool` to constrain the contract.
 target:
-  prompt: <path-under-/prompts/>   # OR
-  tool:   <path-under-/tools/>     # OR
-  agent:  <agent-id>
+  prompt: <path-under-/prompts/>      # OR
+  tool:   <path-under-/tools/>        # OR
+  agent:  <agent-id>                  # OR
+  image:  <registry>/<name>:<tag>     # e.g. ghcr.io/owner/example-server:0.2.0
 
 # How runs are scored.
 metrics:
