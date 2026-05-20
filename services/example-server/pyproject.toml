@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "example-server"
+version = "0.2.0"
+description = "Example MCP server exposing a single echo tool."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "TODO(human): assign-owner" },
+]
+dependencies = [
+  "mcp>=1.0",
+]
+
+[project.scripts]
+example-mcp-server = "example_server.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/example_server"]

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "ghcr.io/hyryo513/example-server:0.2.0"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

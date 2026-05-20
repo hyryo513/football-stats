@@ -16,10 +16,12 @@ the two disagree, **`/CLAUDE.md` is authoritative** — fix this file to match.
 
 - `/specs/` — Kiro-style specs (requirements / design / tasks).
 - `/prompts/` — versioned prompt templates.
-- `/mcp/` — MCP server definitions.
+- `/mcp/` — MCP server definitions (contracts).
+- `/services/` — MCP server implementations (one directory per server).
 - `/tools/` — tool schemas.
 - `/evals/` — eval suites and datasets.
 - `/.kiro/steering/` — steering files (this directory).
+- `/.kiro/settings/` — Kiro client config (MCP servers, etc.).
 - `/.github/workflows/` — CI and agent automation.
 
 Each directory has a `README.md` describing required metadata for artifacts
@@ -59,8 +61,9 @@ Agents MUST NOT:
 1. Touch secrets. No reading, writing, logging, or echoing of `*.env`,
    `*.pem`, `*.key`, `*credentials*`, or anything under a `secrets/`
    directory. Reference secrets only via `${{ secrets.NAME }}`.
-2. Modify `/.github/workflows/`, `/.github/actions/`, `/mcp/`, or `/tools/`
-   without human review. Agents may propose changes; humans approve them.
+2. Modify `/.github/workflows/`, `/.github/actions/`, `/mcp/`, `/tools/`,
+   or any `Dockerfile` without human review. Agents may propose changes;
+   humans approve them.
 3. Open PRs larger than 500 changed lines (excluding lockfiles and generated
    files) without an explicit `## Size justification` section in the PR body.
 4. Bypass review for paths labelled `risk:high` by `risk-tier.yml`.

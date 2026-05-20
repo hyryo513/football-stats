@@ -20,8 +20,18 @@ description: <one-line summary>
 owner: <team-or-handle>
 last-reviewed: YYYY-MM-DD
 
+# OPTIONAL: present when a published container image backs the server.
+# The image is built from /services/<name>/ by publish-mcp-server.yml and
+# pushed to GitHub Packages on every merge to main.
+artifact:
+  registry: ghcr.io
+  image: ghcr.io/<owner>/<name>
+  tag: <semver>                 # MUST equal top-level `version`
+  # digest: sha256:...          # optional; pinned by a follow-up auto-bump
+
 transport:
   type: stdio | sse | http      # how the server is reached
+  image: <registry>/<name>:<tag>  # optional; present iff `artifact` is set
   command: <executable>         # for stdio
   args: []                      # for stdio
   url: <https-url>              # for sse / http
@@ -46,5 +56,10 @@ permissions:                    # explicit allow-list; empty means none
 - **Pin the version** in any consumer config (e.g. agent runtime).
 - **Tool surface integrity**: every entry in `tool-surface` must point at a
   schema under `/tools/`. The eval CI verifies this.
+- **Artifact / tag consistency**: when `artifact` is set, `artifact.tag`,
+  `transport.image`, and the top-level `version` must agree. CI will gate
+  this in a follow-up `verify-manifests.yml`.
 
-See [`example-server.yaml`](./example-server.yaml) for a template.
+See [`example-server.yaml`](./example-server.yaml) for a template and
+[`/services/example-server/`](../services/example-server/) for the
+implementation it backs.
