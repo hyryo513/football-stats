@@ -1,0 +1,84 @@
+# Eval suite for the published example-server container image.
+# Run against ghcr.io/<owner>/example-server:<tag> after the publish
+# workflow promotes a new tag.
+
+id: publish-mcp-server
+version: 0.1.0
+description: >
+  Verifies the example-server image pulled from ghcr.io implements the
+  example-tool echo contract. Mirrors evals/example-eval.yaml plus an
+  image-pullable case.
+owner: "TODO(human): assign-owner"
+last-reviewed: 2026-05-19
+
+# This target extends the schema documented in /evals/README.md.
+# `target.image` means "run this container, then exercise its MCP
+# tool-surface end-to-end". The eval runner is responsible for the
+# docker pull + stdio handshake.
+target:
+  image: ghcr.io/hyryo513/example-server:0.2.0
+  tool: tools/example-tool.json
+
+metrics:
+  - name: exact-output
+    type: exact-match
+    weight: 0.7
+  - name: schema-valid
+    type: custom
+    weight: 0.3
+
+success-criteria:
+  min-score: 0.90
+  min-pass-rate: 0.95
+
+cases:
+  - id: image-pullable
+    description: >
+      docker pull of the target image succeeds and the container responds
+      on stdio within 10 seconds of an MCP initialize frame.
+    expect: container-handshake-ok
+
+  - id: echo-basic
+    description: Plain string round-trips unchanged through the image.
+    tool-call:
+      name: example-tool
+      arguments:
+        message: hello world
+    expected:
+      echoed: hello world
+
+  - id: echo-uppercase
+    description: Uppercase flag transforms the output.
+    tool-call:
+      name: example-tool
+      arguments:
+        message: hello
+        uppercase: true
+    expected:
+      echoed: HELLO
+
+  - id: empty-rejected
+    description: Empty message must be rejected by inputSchema (minLength 1).
+    tool-call:
+      name: example-tool
+      arguments:
+        message: ""
+    expectError: schema-validation
+
+  - id: overlong-rejected
+    description: Message above maxLength must be rejected.
+    tool-call:
+      name: example-tool
+      arguments:
+        # TODO(human): replace with a real 1025-char fixture once the
+        # harness supports loading from a file. Inline placeholder.
+        message: "<<TOO_LONG>>"
+    expectError: schema-validation
+
+# Filled in by CI on the most recent run on `main`. Manual edits are
+# overwritten by the eval-runner once it exists.
+baseline:
+  score: 0.0
+  pass-rate: 0.0
+  run-date: 1970-01-01
+  run-id: NONE
