@@ -53,6 +53,8 @@ jobs:
               /^\.github\/workflows\//,
               /(^|\/)mcp\//,
               /(^|\/)tools\//,
+              // Dockerfile changes alter the image supply chain.
+              /(^|\/)Dockerfile$/,
             ];
             const LOCKFILES = new Set([
               "package-lock.json",

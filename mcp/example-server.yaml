@@ -3,18 +3,27 @@
 # risk:high — changes require human review.
 
 name: example-server
-version: 0.1.0
+version: 0.2.0
 description: >
-  Template MCP server exposing a single read-only example tool. Replace
-  with a real server definition; do not enable as-is.
+  Example MCP server exposing a single echo tool. Implementation lives
+  under /services/example-server/; the published image is referenced by
+  `artifact` and `transport.image` below.
 owner: "TODO(human): assign-owner"
 last-reviewed: 2026-05-19
 
+artifact:
+  registry: ghcr.io
+  # The publish workflow substitutes the lower-cased repo owner at build
+  # time. The tag MUST equal the top-level `version` field above.
+  image: ghcr.io/hyryo513/example-server
+  tag: 0.2.0
+  # digest: sha256:...   # filled by a follow-up auto-bump PR (deferred)
+
 transport:
   type: stdio
+  image: ghcr.io/hyryo513/example-server:0.2.0
   command: example-mcp-server
-  args:
-    - --read-only
+  args: []
 
 tool-surface:
   - name: example-tool

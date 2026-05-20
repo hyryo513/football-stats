@@ -17,10 +17,12 @@ designed to be authored or modified by AI agents, then reviewed by humans.
 | --------------------- | ------------------------------------------ |
 | `/specs/`             | Kiro-style specs (requirements/design/tasks) |
 | `/prompts/`           | Versioned prompt templates                 |
-| `/mcp/`               | MCP server definitions                     |
+| `/mcp/`               | MCP server definitions (contracts)         |
+| `/services/`          | MCP server implementations (one dir per server) |
 | `/tools/`             | Tool definitions / schemas                 |
 | `/evals/`             | Eval suites + datasets                     |
 | `/.kiro/steering/`    | Kiro steering files (mirrors this doc)     |
+| `/.kiro/settings/`    | Kiro client config (MCP servers, etc.)     |
 | `/.github/workflows/` | CI / agent automation                      |
 
 Each directory above contains a `README.md` describing its purpose and the
@@ -68,9 +70,9 @@ AI agents working in this repo **MUST NOT**:
    directory named `secrets/`. Reference secrets only via
    `${{ secrets.NAME }}` in workflows.
 2. **Modify CI without review.** Changes under `/.github/workflows/`,
-   `/.github/actions/`, or `/mcp/` and `/tools/` are tier `risk:high` and
-   require a human reviewer. Agents may *propose* changes but must not
-   self-approve or auto-merge them.
+   `/.github/actions/`, `/mcp/`, `/tools/`, or any `Dockerfile` are tier
+   `risk:high` and require a human reviewer. Agents may *propose* changes
+   but must not self-approve or auto-merge them.
 3. **Open oversized PRs.** PRs larger than **500 changed lines** (additions +
    deletions, excluding lockfiles and generated files) require an explicit
    justification in the PR body under a `## Size justification` heading.
