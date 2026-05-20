@@ -1,0 +1,66 @@
+# Example eval suite (template).
+# Replace contents when authoring a real eval. Every prompt/tool in this
+# repo must reference an eval; this one is the placeholder.
+
+id: example-eval
+version: 0.1.0
+description: >
+  Template eval suite. Covers the example tool's echo behavior with
+  positive, negative, and edge cases.
+owner: "TODO(human): assign-owner"
+last-reviewed: 2026-05-19
+
+# Exactly one target. The example-tool is referenced so the wiring is
+# exercised end-to-end.
+target:
+  tool: tools/example-tool.json
+
+metrics:
+  - name: exact-output
+    type: exact-match
+    weight: 0.7
+  - name: schema-valid
+    type: custom
+    weight: 0.3
+
+success-criteria:
+  min-score: 0.90
+  min-pass-rate: 0.95
+
+cases:
+  - id: echo-basic
+    description: Plain string round-trips unchanged.
+    inputs:
+      message: hello world
+    expected:
+      echoed: hello world
+
+  - id: echo-uppercase
+    description: Uppercase flag transforms the output.
+    inputs:
+      message: hello
+      uppercase: true
+    expected:
+      echoed: HELLO
+
+  - id: empty-rejected
+    description: Empty message must be rejected by inputSchema (minLength 1).
+    inputs:
+      message: ""
+    expectError: schema-validation
+
+  - id: overlong-rejected
+    description: Message above maxLength must be rejected.
+    inputs:
+      # TODO(human): replace with a real 1025-char fixture once the harness
+      # supports loading from a file. Inline placeholder for now.
+      message: "<<TOO_LONG>>"
+    expectError: schema-validation
+
+# Filled in by CI on the most recent run on `main`. Manual edits are
+# overwritten by the eval-runner.
+baseline:
+  score: 0.0
+  pass-rate: 0.0
+  run-date: 1970-01-01
+  run-id: NONE

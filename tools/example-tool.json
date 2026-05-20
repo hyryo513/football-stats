@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "example-tool",
+  "version": "0.1.0",
+  "description": "Template tool schema. Echoes a string back. Replace with a real tool definition.",
+  "owner": "TODO(human): assign-owner",
+  "lastReviewed": "2026-05-19",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["message"],
+    "properties": {
+      "message": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024,
+        "description": "Text the tool will echo back to the caller."
+      },
+      "uppercase": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, the echoed message is upper-cased."
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["echoed"],
+    "properties": {
+      "echoed": {
+        "type": "string",
+        "description": "The (optionally upper-cased) input message."
+      }
+    }
+  },
+  "permissionScope": {
+    "filesystem": {
+      "read": [],
+      "write": []
+    },
+    "network": {
+      "allowHosts": []
+    },
+    "secrets": [],
+    "sideEffects": "read-only"
+  },
+  "evalRef": "evals/example-eval.yaml"
+}
